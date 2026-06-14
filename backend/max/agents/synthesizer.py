@@ -21,9 +21,9 @@ _llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.3)
 
 
 def synthesizer_node(state: MaxState) -> dict:
-    run_id = state.get("run_id", "unknown")
-    result = state.get("result", "")
-    intent = state.get("intent", "general")
+    run_id = state.get("run_id") or "unknown"
+    result = state.get("result") or ""
+    intent = state.get("intent") or "general"
 
     with tracer.start_as_current_span("synthesizer.format") as span:
         span.set_attribute("max.run_id", run_id)
@@ -39,7 +39,8 @@ def synthesizer_node(state: MaxState) -> dict:
                 user_message = ""
                 for msg in reversed(state["messages"]):
                     if isinstance(msg, HumanMessage):
-                        user_message = msg.content
+                        content = msg.content
+                        user_message = content if isinstance(content, str) else str(content)
                         break
 
                 response = _llm.invoke(
@@ -59,12 +60,12 @@ def synthesizer_node(state: MaxState) -> dict:
                         ),
                     ]
                 )
-                final = response.content
+                final = response.content if isinstance(response.content, str) else str(response.content)
             except Exception:
                 logger.exception("[Synthesizer] LLM synthesis failed, returning raw result")
                 final = result
 
-        span.set_attribute("max.final_length", len(final))
+        span.set_attribute("max.final_length", len(final or ""))
 
         return {
             "messages": [AIMessage(content=final)],

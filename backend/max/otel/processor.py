@@ -73,7 +73,7 @@ class MaxSpanProcessor(SpanProcessor):
     def on_end(self, span: ReadableSpan) -> None:
         try:
             attrs = dict(span.attributes or {})
-            run_id = attrs.get("max.run_id")
+            run_id = str(attrs.get("max.run_id", ""))
             if not run_id:
                 return  # span not tagged for MAX — ignore
 
@@ -81,8 +81,9 @@ class MaxSpanProcessor(SpanProcessor):
             if not q:
                 return  # no active SSE consumer for this run
 
+            ctx = span.context
             event = {
-                "span_id": format(span.context.span_id, "016x"),
+                "span_id": format(ctx.span_id, "016x") if ctx else "0",
                 "parent_id": (
                     format(span.parent.span_id, "016x") if span.parent else None
                 ),

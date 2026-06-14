@@ -26,9 +26,9 @@ _llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 
 
 def executor_node(state: MaxState) -> dict:
-    run_id = state.get("run_id", "unknown")
-    selected = state.get("selected_agent", "direct")
-    plan = state.get("plan", "")
+    run_id = state.get("run_id") or "unknown"
+    selected = state.get("selected_agent") or "direct"
+    plan = state.get("plan") or ""
 
     with tracer.start_as_current_span("executor.dispatch") as span:
         span.set_attribute("max.run_id", run_id)
@@ -39,7 +39,8 @@ def executor_node(state: MaxState) -> dict:
         user_message = ""
         for msg in reversed(state["messages"]):
             if isinstance(msg, HumanMessage):
-                user_message = msg.content
+                content = msg.content
+                user_message = content if isinstance(content, str) else str(content)
                 break
 
         result = ""
@@ -81,6 +82,6 @@ def _handle_direct(user_message: str, plan: str, run_id: str) -> str:
                 HumanMessage(content=user_message),
             ]
         )
-        result = response.content
+        result = response.content if isinstance(response.content, str) else str(response.content)
         span.set_attribute("max.result_preview", result[:200])
         return result

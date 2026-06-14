@@ -66,6 +66,7 @@ async def stream_run(thread_id: str, req: SendMessageRequest):
 
     async def run_graph():
         try:
+            assert _graph is not None
             final_state = await _graph.ainvoke(initial_state, config=config)
             # Push a result event then close
             result_event = {

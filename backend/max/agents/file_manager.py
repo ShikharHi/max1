@@ -123,7 +123,8 @@ def run_file_manager(user_message: str, plan: str, run_id: str) -> str:
                 ]
             )
 
-            raw = parse_response.content.strip()
+            raw_content = parse_response.content if isinstance(parse_response.content, str) else str(parse_response.content)
+            raw = raw_content.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):

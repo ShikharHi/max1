@@ -22,7 +22,7 @@ _llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 
 
 def router_node(state: MaxState) -> dict:
-    run_id = state.get("run_id", "unknown")
+    run_id = state.get("run_id") or "unknown"
 
     with tracer.start_as_current_span("router.classify") as span:
         span.set_attribute("max.run_id", run_id)
@@ -32,7 +32,8 @@ def router_node(state: MaxState) -> dict:
         user_message = ""
         for msg in reversed(state["messages"]):
             if isinstance(msg, HumanMessage):
-                user_message = msg.content
+                content = msg.content
+                user_message = content if isinstance(content, str) else str(content)
                 break
 
         system_prompt = (
@@ -48,7 +49,8 @@ def router_node(state: MaxState) -> dict:
                     HumanMessage(content=user_message),
                 ]
             )
-            raw = response.content.strip()
+            raw_content = response.content if isinstance(response.content, str) else str(response.content)
+            raw = raw_content.strip()
             # Strip markdown fences if present
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
