@@ -1,0 +1,14 @@
+{
+  "id": "file_manager",
+  "name": "File Manager",
+  "type": "agent",
+  "description": "Browse, read, write, and organize files on the local filesystem. Respects safe-path rules.",
+  "enabled": true,
+  "capabilities": [
+    "list_files",
+    "read_file",
+    "write_file",
+    "search_files"
+  ],
+  "framework": "langgraph"
+}

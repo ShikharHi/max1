@@ -1,0 +1,9 @@
+{
+  "id": "web_search",
+  "name": "Web Search",
+  "type": "tool",
+  "description": "Search the web for current information, news, and facts.",
+  "enabled": true,
+  "capabilities": ["search", "fetch_url", "summarize_results"],
+  "framework": "any"
+}

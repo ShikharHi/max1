@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+env/
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+__pypackages__/
+
+# Virtual environment
+/.venv
+/.env
+backend/.venv/
+
+# Pytest
+.pytest_cache/
+.env
+*.db
+__pycache__/
+*.pyc
+.venv/
+# IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+pnpm-lock.yaml
+/.next
+/.nuxt
+dist/
+
+# Next.js environment
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+
+# Runtime
+*.pid
+*.seed
+
+# Coverage
+.nyc_output/
+coverage/
+
+# OS generated files
+Icon?
