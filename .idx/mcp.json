@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "langchain-docs-mcp": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcpdoc",
+        "mcpdoc",
+        "--urls",
+        "LangChain:https://python.langchain.com/llms.txt",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}

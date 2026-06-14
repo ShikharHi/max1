@@ -53,73 +53,52 @@ Sign up at [console.groq.com](https://console.groq.com) — it's free.
 
 ```bash
 # From repo root
-chmod +x setup-backend.sh && ./setup-backend.sh
+# Create and activate a virtualenv (example for Windows PowerShell)
+python -m venv backend/.venv
+backend/.venv\Scripts\Activate.ps1
+pip install -e backend
 
-# Add your key
+# Add your key to backend/.env (create the file if missing)
 echo "GROQ_API_KEY=your_key_here" >> backend/.env
 
-# Start
+# Start the FastAPI app
 cd backend
-source .venv/bin/activate
 uvicorn max.main:app --reload --port 8000
 ```
 
 API will be at `http://localhost:8000`  
 Docs at `http://localhost:8000/docs`
 
-### 3. Frontend
 
-```bash
-# From repo root (new terminal)
-chmod +x setup-frontend.sh && ./setup-frontend.sh
-
-cd frontend && npm run dev
-```
-
-Open `http://localhost:3000`
 
 ## Project Structure
 
 ```
-max/
+.
 ├── backend/
-│   ├── max/
-│   │   ├── otel/
-│   │   │   ├── processor.py    ← MaxSpanProcessor (the core novel piece)
-│   │   │   └── setup.py        ← TracerProvider initialization
-│   │   ├── agents/
-│   │   │   ├── router.py       ← Intent classification + agent selection
-│   │   │   ├── executor.py     ← Dispatch to subagents
-│   │   │   ├── synthesizer.py  ← Final response shaping
-│   │   │   └── file_manager.py ← FileManager subagent (pure Python + OTel)
-│   │   ├── core/
-│   │   │   ├── state.py        ← MaxState TypedDict
-│   │   │   └── graph.py        ← LangGraph StateGraph compilation
-│   │   ├── plugins/
-│   │   │   ├── registry.py     ← Manifest-driven plugin registry
-│   │   │   └── manifests/      ← JSON manifests per plugin
-│   │   ├── api/
-│   │   │   ├── threads.py      ← Thread CRUD
-│   │   │   ├── runs.py         ← SSE streaming endpoint
-│   │   │   └── plugins.py      ← Plugin toggle API
-│   │   └── main.py             ← FastAPI app + lifespan
-│   └── pyproject.toml
-│
-└── frontend/
-    └── src/
-        ├── app/
-        │   ├── c/              ← Chat routes (/c/new, /c/:threadId)
-        │   └── plugins/        ← Plugin marketplace
-        ├── components/
-        │   ├── chat/           ← MessageBubble, ChatInput, ChatView
-        │   ├── sidebar/        ← Thread list + CRUD
-        │   └── steps/          ← OTel span tree viewer
-        ├── hooks/
-        │   └── useChat.ts      ← SSE stream consumer
-        ├── store/
-        │   └── useMaxStore.ts  ← Zustand global state
-        └── lib/
-            └── api.ts          ← API client + streamRun generator
+│   ├── pyproject.toml
+│   └── max/
+│       ├── otel/
+│       │   ├── processor.py    ← MaxSpanProcessor (the core novel piece)
+│       │   └── setup.py        ← TracerProvider initialization
+│       ├── agents/
+│       │   ├── router.py       ← Intent classification + agent selection
+│       │   ├── executor.py     ← Dispatch to subagents
+│       │   ├── synthesizer.py  ← Final response shaping
+│       │   └── file_manager.py ← FileManager subagent (pure Python + OTel)
+│       ├── core/
+│       │   ├── state.py        ← MaxState TypedDict
+│       │   └── graph.py        ← LangGraph StateGraph compilation
+│       ├── plugins/
+│       │   ├── registry.py     ← Manifest-driven plugin registry
+│       │   └── manifests/      ← JSON manifests per plugin
+│       ├── api/
+│       │   ├── threads.py      ← Thread CRUD
+│       │   ├── runs.py         ← SSE streaming endpoint
+│       │   └── plugins.py      ← Plugin toggle API
+│       └── main.py             ← FastAPI app + lifespan
+
+└── README.md
 ```
 
 ## Adding a New Agent
@@ -200,5 +179,4 @@ data: [DONE]
 ## Tech Stack
 
 **Backend:** FastAPI · LangGraph · LangChain-Groq · OpenTelemetry SDK · AsyncSqliteSaver  
-**Frontend:** Next.js 14 · TypeScript · Zustand · Framer Motion · Tailwind CSS  
 **LLM:** Groq llama-3.3-70b-versatile
