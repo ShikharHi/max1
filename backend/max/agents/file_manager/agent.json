@@ -4,11 +4,7 @@
   "type": "agent",
   "description": "Browse, read, write, and organize files on the local filesystem. Respects safe-path rules.",
   "enabled": true,
-  "capabilities": [
-    "list_files",
-    "read_file",
-    "write_file",
-    "search_files"
-  ],
-  "framework": "langgraph"
+  "capabilities": ["list_files", "read_file", "write_file", "search_files"],
+  "entry_point": "agent.py",
+  "function": "run_file_manager"
 }

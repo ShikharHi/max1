@@ -1,5 +1,5 @@
 """
-max/agents/file_manager.py
+max/agents/file_manager/agent.py
 
 FileManager subagent — pure Python, OTel-instrumented.
 No LangGraph here — this is the point: any framework can be a subagent.
@@ -7,6 +7,7 @@ No LangGraph here — this is the point: any framework can be a subagent.
 Hard-blocks: node_modules, .git, __pycache__, *.lock, /etc, /sys, /proc
 """
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -19,7 +20,14 @@ from max.otel import get_tracer
 logger = logging.getLogger(__name__)
 tracer = get_tracer("max.agents.file_manager")
 
-_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+_llm = None
+
+
+def _get_llm():
+    global _llm
+    if _llm is None:
+        _llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    return _llm
 
 # Blocked path patterns — never operate on these
 BLOCKED_PATTERNS = {
@@ -103,7 +111,7 @@ def run_file_manager(user_message: str, plan: str, run_id: str) -> str:
             s.set_attribute("max.agent", "file_manager")
             s.set_attribute("max.step", "Parsing file operation intent")
 
-            parse_response = _llm.invoke(
+            parse_response = _get_llm().invoke(
                 [
                     SystemMessage(
                         content=(
@@ -129,8 +137,6 @@ def run_file_manager(user_message: str, plan: str, run_id: str) -> str:
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):
                     raw = raw[4:]
-
-            import json
 
             try:
                 parsed = json.loads(raw.strip())

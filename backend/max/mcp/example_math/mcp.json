@@ -1,0 +1,12 @@
+{
+  "id": "math_server",
+  "name": "Math MCP Server",
+  "type": "mcp",
+  "description": "Arithmetic operations via MCP — add, multiply, divide.",
+  "enabled": true,
+  "capabilities": ["add", "multiply", "divide"],
+  "transport": "stdio",
+  "command": "python",
+  "args": ["server.py"],
+  "env": {}
+}

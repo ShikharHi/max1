@@ -1,0 +1,10 @@
+{
+  "id": "calculator",
+  "name": "Calculator",
+  "type": "tool",
+  "description": "Evaluate mathematical expressions and perform arithmetic calculations.",
+  "enabled": true,
+  "capabilities": ["add", "subtract", "multiply", "divide", "evaluate_expression"],
+  "entry_point": "tool.py",
+  "function": "run"
+}

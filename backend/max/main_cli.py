@@ -16,6 +16,9 @@ Slash commands inside the chat:
     /delete             Delete current thread
     /plugins            List plugins and their status
     /toggle <id>        Toggle a plugin on/off
+    /history            List the state checkpoint history of the thread
+    /replay <id>        Replay execution from a specific checkpoint
+    /fork <id> <msg>    Fork from a checkpoint with a new message
     /info               Show server health + current thread
     /clear              Clear the terminal
     /help               Show slash-command help
@@ -49,6 +52,8 @@ from rich.prompt import Prompt
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(_BACKEND_DIR / ".env")
 
+from max.core.snapshots import restore_snapshot
+
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
@@ -81,6 +86,9 @@ HELP_TEXT = """
   [cyan]/delete[/cyan]              Delete the current thread
   [cyan]/plugins[/cyan]             List plugins and their status
   [cyan]/toggle[/cyan] [dim]<id>[/dim]         Toggle a plugin on/off
+  [cyan]/history[/cyan]             List user-friendly input checkpoint history
+  [cyan]/undo[/cyan] [dim][idx][/dim]          Undo the input at index (and everything after it)
+  [cyan]/fork[/cyan] [dim]<idx/id> <msg>[/dim]  Fork execution with a new message
   [cyan]/info[/cyan]                Server health + current thread
   [cyan]/clear[/cyan]               Clear the terminal
   [cyan]/help[/cyan]                Show this help
@@ -170,17 +178,31 @@ class MaxClient:
         r.raise_for_status()
         return r.json()
 
+    # ── time travel ───────────────────────────────────────────────────────────
+
+    async def get_history(self, thread_id: str, limit: int = 20) -> list[dict]:
+        r = await self._http.get(f"/threads/{thread_id}/history", params={"limit": limit})
+        r.raise_for_status()
+        return r.json()
+
     # ── streaming message ─────────────────────────────────────────────────────
 
-    async def stream_message(self, thread_id: str, message: str):
+    async def stream_message(self, thread_id: str, message: str = None, checkpoint_id: str = None, fork_values: dict = None):
         """POST to /threads/{id}/runs/stream and yield parsed SSE events."""
         import httpx
 
         run_id = str(uuid.uuid4())
         url = f"{self.base_url}/threads/{thread_id}/runs/stream"
+        payload = {"run_id": run_id}
+        if message:
+            payload["message"] = message
+        if checkpoint_id:
+            payload["checkpoint_id"] = checkpoint_id
+        if fork_values:
+            payload["fork_values"] = fork_values
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as c:
-            async with c.stream("POST", url, json={"message": message, "run_id": run_id}) as resp:
+            async with c.stream("POST", url, json=payload) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     line = line.strip()
@@ -208,6 +230,7 @@ class ChatSession:
         self.thread_id: str | None = None
         self.thread_title: str = "untitled"
         self._cache: list[dict] = []
+        self.active_checkpoint_id: str | None = None
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -224,6 +247,7 @@ class ChatSession:
             data = await self.client.create_thread(title)
             self.thread_id = data["thread_id"]
             self.thread_title = data.get("metadata", {}).get("title", "") or "untitled"
+            self.active_checkpoint_id = None
             console.print(f"  [green]+[/green] Created thread {self._label()}")
         except Exception as e:
             console.print(f"  [red]Error:[/red] {e}")
@@ -275,6 +299,7 @@ class ChatSession:
         th = self._cache[idx]
         self.thread_id = th["thread_id"]
         self.thread_title = th.get("metadata", {}).get("title", "") or "untitled"
+        self.active_checkpoint_id = None
         console.print(f"  [green]Switched to[/green] {self._label()}")
 
     async def cmd_rename(self, args: str):
@@ -306,6 +331,7 @@ class ChatSession:
             console.print(f"  [red]Deleted[/red] {label}")
             self.thread_id = None
             self.thread_title = "untitled"
+            self.active_checkpoint_id = None
         except Exception as e:
             console.print(f"  [red]Error:[/red] {e}")
 
@@ -349,6 +375,165 @@ class ChatSession:
         except Exception as e:
             console.print(f"  [red]Error:[/red] {e}")
 
+    async def cmd_history(self, _a: str):
+        if not self.thread_id:
+            console.print("  [red]No active thread.[/red]")
+            return
+        try:
+            history = await self.client.get_history(self.thread_id)
+        except Exception as e:
+            console.print(f"  [red]Error:[/red] {e}")
+            return
+        
+        if not history:
+            console.print("  [dim]No history found.[/dim]")
+            return
+
+        # Reconstruct user-friendly turns (user inputs only)
+        user_turns = []
+        for ch in history:
+            if "router" in ch.get("next_nodes", []):
+                vals = ch.get("values", {})
+                msgs = vals.get("messages", [])
+                
+                # Find the human message
+                human_msgs = [m for m in msgs if m.get("type") == "human"]
+                if human_msgs:
+                    msg_text = human_msgs[-1].get("content", "")
+                    if msg_text:
+                        # Deduplicate by checkpoint_id
+                        if not any(turn["checkpoint_id"] == ch["checkpoint_id"] for turn in user_turns):
+                            user_turns.append({
+                                "checkpoint_id": ch["checkpoint_id"],
+                                "parent_checkpoint_id": ch.get("parent_checkpoint_id"),
+                                "message": msg_text,
+                                "step": ch["step"],
+                                "next_nodes": ch.get("next_nodes", [])
+                            })
+        # Reverse to chronological order (oldest first)
+        user_turns.reverse()
+
+        if not user_turns:
+            console.print("  [dim]No user inputs found in history.[/dim]")
+            return
+
+        t = Table(box=box.SIMPLE_HEAVY, border_style="dim", header_style="bold magenta", pad_edge=True)
+        t.add_column("Idx", style="yellow", width=4, justify="right")
+        t.add_column("User Input", style="white", min_width=30)
+        t.add_column("Checkpoint ID", style="cyan", width=15)
+
+        # Cache these for undo/fork references
+        self._history_cache = user_turns
+
+        for idx, turn in enumerate(user_turns, 1):
+            t.add_row(str(idx), escape(turn["message"]), turn["checkpoint_id"][:12])
+
+        console.print(t)
+        console.print("  [dim]Use [cyan]/undo <idx>[/cyan] to undo that input (and everything after it),[/dim]")
+        console.print("  [dim]or [cyan]/fork <idx> <msg>[/cyan] to fork with a new input from that point.[/dim]")
+
+    async def cmd_undo(self, args: str):
+        if not self.thread_id:
+            console.print("  [red]No active thread.[/red]")
+            return
+        
+        # Load history to find checkpoints
+        try:
+            history = await self.client.get_history(self.thread_id)
+        except Exception as e:
+            console.print(f"  [red]Error fetching history:[/red] {e}")
+            return
+
+        # Reconstruct user_turns exactly like in cmd_history
+        user_turns = []
+        for ch in history:
+            if "router" in ch.get("next_nodes", []):
+                vals = ch.get("values", {})
+                msgs = vals.get("messages", [])
+                human_msgs = [m for m in msgs if m.get("type") == "human"]
+                if human_msgs:
+                    msg_text = human_msgs[-1].get("content", "")
+                    if msg_text:
+                        if not any(t["checkpoint_id"] == ch["checkpoint_id"] for t in user_turns):
+                            user_turns.append(ch)
+
+        user_turns.reverse()
+
+        if not user_turns:
+            console.print("  [dim]No inputs to undo.[/dim]")
+            return
+
+        args = args.strip()
+        if not args:
+            # Default to undoing the LAST input
+            idx = len(user_turns)
+        else:
+            if not args.isdigit():
+                console.print("  [red]Usage:[/red] /undo [index]")
+                return
+            idx = int(args)
+            if idx < 1 or idx > len(user_turns):
+                console.print(f"  [red]Invalid index. Range: 1-{len(user_turns)}[/red]")
+                return
+
+        target_checkpoint = user_turns[idx - 1]
+        cid = target_checkpoint.get("parent_checkpoint_id") or target_checkpoint["checkpoint_id"]
+
+        console.print(f"  [magenta]Undoing input and reverting to state before checkpoint {cid[:12]}...[/magenta]")
+        
+        # 1. Ask the server to prune the database checkpoints/writes
+        try:
+            await self.client.revert_thread(self.thread_id, cid)
+        except Exception as e:
+            console.print(f"  [yellow]Note: Could not revert server thread state: {e}[/yellow]")
+
+        # 2. Restore files to the target checkpoint state immediately
+        try:
+            restore_snapshot(self.thread_id, cid)
+            console.print("  [green]Workspace files successfully reverted to target state.[/green]")
+        except Exception as e:
+            console.print(f"  [yellow]Note: Could not restore file snapshot: {e}[/yellow]")
+
+        # Update the active checkpoint ID so the next message forks from here
+        self.active_checkpoint_id = cid
+        console.print(f"  [green]State reverted. Ready for new input.[/green]")
+
+    async def cmd_replay(self, args: str):
+        if not self.thread_id:
+            console.print("  [red]No active thread.[/red]")
+            return
+        cid = args.strip()
+        if not cid:
+            console.print("  [red]Usage:[/red] /replay <checkpoint_id>")
+            return
+        
+        console.print(f"  [magenta]Replaying from checkpoint {cid}...[/magenta]")
+        await self._do_stream(message=None, checkpoint_id=cid, fork_values=None)
+
+    async def cmd_fork(self, args: str):
+        if not self.thread_id:
+            console.print("  [red]No active thread.[/red]")
+            return
+        
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            console.print("  [red]Usage:[/red] /fork <idx_or_checkpoint_id> <new message>")
+            return
+        
+        target = parts[0]
+        msg = parts[1]
+
+        # Check if the target is an index from the history cache
+        cid = target
+        if target.isdigit() and hasattr(self, "_history_cache"):
+            idx = int(target)
+            if 1 <= idx <= len(self._history_cache):
+                cid = self._history_cache[idx - 1]["checkpoint_id"]
+
+        console.print(f"  [magenta]Forking from checkpoint {cid[:12]} with new message...[/magenta]")
+        fork_values = {"messages": [{"type": "human", "content": msg}]}
+        await self._do_stream(message=None, checkpoint_id=cid, fork_values=fork_values)
+
     async def cmd_info(self, _a: str):
         try:
             h = await self.client.health()
@@ -371,32 +556,7 @@ class ChatSession:
 
     # ── send message & stream response ────────────────────────────────────────
 
-    async def send(self, message: str):
-        # Auto-create thread on first message
-        if not self.thread_id:
-            words = message.split()[:6]
-            title = " ".join(words)
-            if len(title) > 40:
-                title = title[:37] + "..."
-            try:
-                data = await self.client.create_thread(title)
-                self.thread_id = data["thread_id"]
-                self.thread_title = data.get("metadata", {}).get("title", "") or title
-                console.print(f"  [dim]New thread:[/dim] {self._label()}")
-                console.print()
-            except Exception as e:
-                console.print(f"  [red]Cannot create thread:[/red] {e}")
-                return
-
-        # Show user message
-        console.print(Panel(
-            escape(message),
-            title="[bold bright_magenta]You[/bold bright_magenta]",
-            title_align="left", border_style="bright_magenta",
-            box=box.ROUNDED, padding=(0, 1),
-        ))
-        console.print()
-
+    async def _do_stream(self, message: str = None, checkpoint_id: str = None, fork_values: dict = None):
         assert self.thread_id is not None
         steps = 0
         result = ""
@@ -404,7 +564,7 @@ class ChatSession:
 
         try:
             with console.status("[bold bright_cyan]Thinking...[/bold bright_cyan]", spinner="dots"):
-                async for event in self.client.stream_message(self.thread_id, message):
+                async for event in self.client.stream_message(self.thread_id, message, checkpoint_id, fork_values):
                     etype = event.get("type", "")
 
                     if etype == "step":
@@ -455,6 +615,40 @@ class ChatSession:
 
         console.print()
 
+
+    async def send(self, message: str):
+        # Auto-create thread on first message
+        if not self.thread_id:
+            words = message.split()[:6]
+            title = " ".join(words)
+            if len(title) > 40:
+                title = title[:37] + "..."
+            try:
+                data = await self.client.create_thread(title)
+                self.thread_id = data["thread_id"]
+                self.thread_title = data.get("metadata", {}).get("title", "") or title
+                console.print(f"  [dim]New thread:[/dim] {self._label()}")
+                console.print()
+            except Exception as e:
+                console.print(f"  [red]Cannot create thread:[/red] {e}")
+                return
+
+        # Show user message
+        console.print(Panel(
+            escape(message),
+            title="[bold bright_magenta]You[/bold bright_magenta]",
+            title_align="left", border_style="bright_magenta",
+            box=box.ROUNDED, padding=(0, 1),
+        ))
+        console.print()
+
+        if self.active_checkpoint_id:
+            cid = self.active_checkpoint_id
+            self.active_checkpoint_id = None
+            await self._do_stream(message=None, checkpoint_id=cid, fork_values={"messages": [{"type": "human", "content": message}]})
+        else:
+            await self._do_stream(message=message)
+
     # ── main loop ─────────────────────────────────────────────────────────────
 
     async def run(self):
@@ -471,6 +665,17 @@ class ChatSession:
             await self.client.close()
             return
 
+        # Auto-load most recent thread on startup
+        try:
+            self._cache = await self.client.list_threads()
+            if self._cache:
+                th = self._cache[0]
+                self.thread_id = th["thread_id"]
+                self.thread_title = th.get("metadata", {}).get("title", "") or "untitled"
+                console.print(f"  [green]Loaded most recent thread:[/green] {self._label()}")
+        except Exception:
+            pass
+
         console.print("  [dim]Type a message to chat, or[/dim] [cyan]/help[/cyan] [dim]for commands.[/dim]")
         console.print("  [dim]A thread will be created automatically on your first message.[/dim]")
         console.print()
@@ -481,7 +686,10 @@ class ChatSession:
             "/new": self.cmd_new, "/threads": self.cmd_threads,
             "/switch": self.cmd_switch, "/rename": self.cmd_rename,
             "/delete": self.cmd_delete, "/plugins": self.cmd_plugins,
-            "/toggle": self.cmd_toggle, "/info": self.cmd_info,
+            "/toggle": self.cmd_toggle, "/history": self.cmd_history,
+            "/undo": self.cmd_undo,
+            "/replay": self.cmd_replay, "/fork": self.cmd_fork,
+            "/info": self.cmd_info,
             "/help": self.cmd_help, "/clear": self.cmd_clear,
         }
 
